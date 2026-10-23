@@ -1,0 +1,59 @@
+name: Answer discussions
+
+# Claude posts a first answer to new questions in this repo's Discussions:
+# new discussions in Q&A, and top-level comments in the giscus page threads.
+# The answering code and the site content live in the private site repo
+# (iberrozpe/classical-crypto-today, scripts/answer-discussion.mjs), so this
+# job checks it out with a read-only token.
+#
+# Secrets: ANTHROPIC_API_KEY, and SITE_REPO_TOKEN (a fine-grained token with
+# read-only Contents access to the site repo). Without either, the job does
+# nothing useful. Set the repository variable AI_ANSWERS to "off" to pause it.
+# Comments posted with GITHUB_TOKEN don't trigger workflows, so the bot never
+# answers itself.
+#
+# Source of truth: scripts/community-repo/ in the site repo.
+
+on:
+  discussion:
+    types: [created]
+  discussion_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  discussions: write
+
+concurrency:
+  group: answer-discussion-${{ github.event.discussion.number }}
+  cancel-in-progress: false
+
+jobs:
+  answer:
+    if: vars.AI_ANSWERS != 'off' && github.event.sender.type != 'Bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: iberrozpe/classical-crypto-today
+          token: ${{ secrets.SITE_REPO_TOKEN }}
+          path: site
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install dependencies
+        working-directory: site
+        run: npm ci
+
+      - name: Answer with Claude
+        working-directory: site
+        run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/answer-discussion.mjs
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANSWER_CATEGORIES: "Q&A,Page discussions"
